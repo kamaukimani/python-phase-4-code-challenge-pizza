@@ -19,79 +19,62 @@ db.init_app(app)
 
 api = Api(app)
 
-# Index route
+
 @app.route("/")
 def index():
     return "<h1>Code challenge</h1>"
 
-# Route to get all restaurants
+
 class Restaurants(Resource):
     def get(self):
         restaurants = Restaurant.query.all()
-        # Pass include_pizzas=False to exclude restaurant_pizzas in the list of restaurants
-        return [restaurant.to_dict(include_pizzas=False) for restaurant in restaurants], 200
+        return [restaurant.to_dict(only=('id', 'name', 'address')) for restaurant in restaurants]
 
-# Route to get a single restaurant by ID
+api.add_resource(Restaurants, '/restaurants')
+
 class RestaurantByID(Resource):
     def get(self, id):
-        restaurant = Restaurant.query.get(id)
+        restaurant = Restaurant.query.filter_by(id=id).first()
         if not restaurant:
-            return {"error": "Restaurant not found"}, 404
-        # Pass include_pizzas=True to include the restaurant_pizzas
-        return restaurant.to_dict(include_pizzas=True), 200
-
-# Route to delete a restaurant by ID
-class DeleteRestaurant(Resource):
+            return {'error': 'Restaurant not found'}, 404
+        return restaurant.to_dict(only=('id', 'name', 'address', 'restaurant_pizzas.id', 'restaurant_pizzas.price', 'restaurant_pizzas.pizza_id', 'restaurant_pizzas.restaurant_id', 'restaurant_pizzas.pizza.id', 'restaurant_pizzas.pizza.name', 'restaurant_pizzas.pizza.ingredients'))
+    
     def delete(self, id):
-        restaurant = Restaurant.query.get(id)
+        restaurant = Restaurant.query.filter_by(id=id).first()
         if not restaurant:
-            return {"error": "Restaurant not found"}, 404
-
-        # Delete associated RestaurantPizzas first (if cascade deletes aren't set)
-        for rp in restaurant.restaurant_pizzas:
-            db.session.delete(rp)
-        
+            return {'error': 'Restaurant not found'}, 404
         db.session.delete(restaurant)
         db.session.commit()
         return '', 204
 
-# Route to get all pizzas
+api.add_resource(RestaurantByID, '/restaurants/<int:id>')
 class Pizzas(Resource):
     def get(self):
         pizzas = Pizza.query.all()
-        return [pizza.to_dict() for pizza in pizzas], 200
+        return [pizza.to_dict(only=('id', 'name', 'ingredients')) for pizza in pizzas]
 
-# Route to create a new restaurant_pizza
-class RestaurantPizzaCreate(Resource):
+api.add_resource(Pizzas, '/pizzas')
+class RestaurantPizzas(Resource):
     def post(self):
         data = request.get_json()
-        price = data.get("price")
-        pizza_id = data.get("pizza_id")
-        restaurant_id = data.get("restaurant_id")
+        try:
+            restaurant_pizza = RestaurantPizza(
+                price=data['price'],
+                pizza_id=data['pizza_id'],
+                restaurant_id=data['restaurant_id']
+            )
+            db.session.add(restaurant_pizza)
+            db.session.commit()
+            return restaurant_pizza.to_dict(only=('id', 'price', 'pizza_id', 'restaurant_id', 'pizza.id', 'pizza.name', 'pizza.ingredients', 'restaurant.id', 'restaurant.name', 'restaurant.address')), 201
+        except (ValueError, Exception):
+            return {'errors': ['validation errors']}, 400
 
-        # Validate the price
-        if price < 1 or price > 30:
-            return {"errors": ["validation errors"]}, 400
 
-        pizza = Pizza.query.get(pizza_id)
-        restaurant = Restaurant.query.get(restaurant_id)
 
-        if not pizza or not restaurant:
-            return {"error": "Pizza or Restaurant not found"}, 404
+#api.add_resource(RestaurantByID, '/restaurants/<int:id>')
 
-        # Create and add the new RestaurantPizza
-        restaurant_pizza = RestaurantPizza(price=price, pizza_id=pizza.id, restaurant_id=restaurant.id)
-        db.session.add(restaurant_pizza)
-        db.session.commit()
+api.add_resource(RestaurantPizzas, '/restaurant_pizzas')
 
-        return restaurant_pizza.to_dict(), 201
-
-# Registering routes with Flask-RESTful API
-api.add_resource(Restaurants, '/restaurants')
-api.add_resource(RestaurantByID, '/restaurants/<int:id>')
-api.add_resource(DeleteRestaurant, '/restaurants/<int:id>')
-api.add_resource(Pizzas, '/pizzas')
-api.add_resource(RestaurantPizzaCreate, '/restaurant_pizzas')
 
 if __name__ == "__main__":
     app.run(port=5555, debug=True)
